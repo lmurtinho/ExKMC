@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 from sklearn.cluster import KMeans
-from .splitters import get_min_mistakes_cut
-from .splitters import get_min_surrogate_cut
+# removed . below to make it work on native Jupyter notebook
+from splitters import get_min_mistakes_cut
+from splitters import get_min_surrogate_cut
 
 try:
     from graphviz import Source
@@ -21,13 +22,15 @@ LEAF_DATA_KEY_SPLITTER = 'SPLITTER_KEY'
 
 class Tree:
 
-    def __init__(self, k, max_leaves=None, verbose=0, light=True, base_tree='IMM', n_jobs=None):
+    def __init__(self, k, max_leaves=None, verbose=0, light=True,
+                valid_col_idx=None, base_tree='IMM', n_jobs=None):
         """
         Constructor for explainable k-means tree.
         :param k: Number of clusters.
         :param max_leaves: Grow a tree with up to max_leaves. If None then a tree with k leaves will be constructed.
         :param verbose: Verbosity mode.
         :param light: If False, the object will store a copy of the input examples associated with each leaf.
+        :pama valid_col_idx: array with indices of dimensions that can be used to split a tree. If None all dimensions can be used.
         :param base_tree: Specify weather the first k leaves are generated according to IMM splitting criteria or not. Valid values are ["IMM", "NONE"].
         :param n_jobs: The number of jobs to run in parallel.
         """
@@ -44,6 +47,7 @@ class Tree:
         self.base_tree = base_tree
         self.n_jobs = n_jobs if n_jobs is not None else 1
         self._feature_importance = None
+        self.valid_col_idx = valid_col_idx
 
     def _build_tree(self, x_data, y, valid_centers, valid_cols):
         """
@@ -129,9 +133,12 @@ class Tree:
         self.all_centers = np.array(kmeans.cluster_centers_, dtype=np.float64)
 
         if self.base_tree == "IMM":
+            valid_cols = np.zeros(self.all_centers.shape[1], dtype=np.int32)
+            valid_cols[self.valid_col_idx] = 1
             self.tree = self._build_tree(x_data, y,
-                                         np.ones(self.all_centers.shape[0], dtype=np.int32),
-                                         np.ones(self.all_centers.shape[1], dtype=np.int32))
+                                         np.ones(self.all_centers.shape[0],
+                                                 dtype=np.int32),
+                                         valid_cols)
             leaves = self.k
         else:
             self.tree = Node()
