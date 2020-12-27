@@ -36,6 +36,7 @@ class Tree:
         """
         self.k = k
         self.tree = None
+        self.node_list = []
         self._leaves_data = {}
         self.max_leaves = k if max_leaves is None else max_leaves
         if self.max_leaves < k:
@@ -61,6 +62,7 @@ class Tree:
         if self.verbose > 1:
             print('build node (samples=%d)' % x_data.shape[0])
         node = Node()
+        self.node_list.append(node)
         if x_data.shape[0] == 0:
             node.value = 0
             return node
