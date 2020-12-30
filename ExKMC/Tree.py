@@ -159,6 +159,43 @@ class Tree:
 
         return self
 
+    def fit_1d_cost_search(self, x_data, kmeans=None, dim=None):
+        """
+        Build a threshold tree from the training set x_data based on the
+        algorithm to minimize the expected cost of searching through the tree,
+        for a single dimension
+        """
+        x_data = convert_input(x_data)
+
+        if kmeans is None:
+            if self.verbose > 0:
+                print('Finding %d-means' % self.k)
+            kmeans = KMeans(self.k, n_jobs=self.n_jobs, verbose=self.verbose,
+                            n_init=1, max_iter=40)
+            kmeans.fit(x_data)
+        else:
+            assert kmeans.n_clusters == self.k
+
+        if hasattr(kmeans,'labels_'):
+            y = np.array(kmeans.labels_, dtype=np.int32)
+        else:
+            y = np.array(kmeans.predict(x_data), dtype=np.int32)
+
+        if not(dim):
+            dim = self.valid_col_idx[0]
+
+        centers = kmeans.cluster_centers_
+        idx_centers = centers[:,dim].argsort()
+        centers_d   = centers[:,dim][idx_centers]
+        assigns_d   = centers[y,dim]
+        x_d         =  x_data[:,dim]
+
+        separated = get_separations(x_d,centers_d,assigns_d)
+        costs = separated.sum(axis=0)
+        tree = tree_with_costs(costs)
+        tree_with_mids(tree,centers_d,idx_centers,dim)
+        self.tree = tree
+
     def fit_predict(self, x_data, kmeans=None):
         """
         Build a threshold tree from the training set x_data, and returns the predicted clusters.
@@ -442,3 +479,112 @@ def convert_input(data):
     else:
         raise Exception(type(data) + ' is not supported type')
     return data
+
+def find_first_above(val, seq):
+    if not len(seq):
+        return 0
+    elif len(seq) == 1:
+        return int(val >= seq[0])
+    mid = len(seq) // 2
+    if seq[mid] > val:
+        return find_first_above(val, seq[:mid])
+    else:
+        return mid + 1 + find_first_above(val, seq[mid+1:])
+
+
+def get_separations(data, centers, assigns):
+    mids = (centers[1:] + centers[:-1]) / 2
+    # print(centers, mids)
+    above_d = np.array([find_first_above(d, mids) for d in data])
+    above_c_dict = {c: find_first_above(c, mids) for c in centers}
+    above_c = np.array([above_c_dict[a] for a in assigns])
+    return np.array([[int( (i >= min(j)) and (i < max(j)) )
+                         for i in range(len(mids))]
+                        for j in zip(above_d, above_c)])
+
+def tree_with_costs(costs):
+    if not len(costs):
+        return
+    min_cost = costs.min()
+    if not min_cost:
+        cut = costs.argmin()
+        node = Node()
+        node.value = cut
+        node.left  = tree_with_costs(costs[:cut])
+        node.right = tree_with_costs(costs[cut+1:])
+        return node
+    costs = costs / min_cost
+    n = len(costs)
+    j=1
+    lc=rc=0
+    t = np.ceil(np.log2(n)**(1/3))
+    r = max(np.ceil(1 - 1/t), 2)
+#     print(costs, j, lc, rc, r, t)
+    return tree_with_pos_costs(costs,j,lc,rc,r,t,0)
+
+def tree_with_pos_costs(costs,j,lc,rc,r,t,prev):
+    # print("infos:", costs, j, lc, rc, r, t)
+    if not len(costs):
+        # print()
+        return Node()
+    min_cost = r**(j-1)
+    max_cost = r**j
+    mask = (costs >= min_cost) * (costs <= max_cost)
+#     print("Step 1")
+    while not np.any(mask):
+#         print(min_cost, max_cost)
+        j += 1
+        min_cost = r**(j-1)
+        max_cost = r**j
+        mask = (costs >= min_cost) * (costs <= max_cost)
+        lc = rc = 0 # TODO: isso fica na segunda versão?
+    idx_mask = np.where(mask)[0]
+    # print("idx_mask:", idx_mask)
+
+    add = 1
+    if lc == t:
+        lc = 0
+        x_idx = idx_mask[0]
+    elif rc == t:
+        rc = 0
+        x_idx = idx_mask[-1]
+    else:
+        add = 0
+        m_start = idx_mask[0]
+        m_end = idx_mask[-1]
+        M = costs[m_start:m_end+1]
+        # print("M:", M)
+        x_idx = (m_start + m_end) // 2
+        step = 0
+        while not mask[x_idx]:
+            step += 1
+            x_idx += step
+            if mask[x_idx]:
+                break
+            step += 1
+            x_idx -= step
+
+    node = Node()
+    node.feature = x_idx + prev
+    node.value = costs[x_idx]
+    # print("result:", node.feature, node.value)
+    # print()
+    # TODO: check valores de lc e rc na segunda versão
+    node.left  = tree_with_pos_costs(costs[:x_idx],1,lc+add,0,r,t,prev)
+    node.right = tree_with_pos_costs(costs[x_idx+1:],1,0,rc+add,r,t,node.feature+1)
+    return node
+
+def tree_with_mids(tree,centers,indices,dim):
+    mids = (centers[1:] + centers[:-1]) / 2
+    nodes = [(None, None, tree)]
+    while nodes:
+        cut, side, node = nodes.pop(0)
+        if node.left:
+            nodes.append((node.feature, "left", node.left))
+            nodes.append((node.feature, "right", node.right))
+            node.value = mids[node.feature]
+            node.feature = dim
+        elif side == "left":
+            node.value = indices[cut]
+        else:
+            node.value = indices[cut+1]
