@@ -112,6 +112,12 @@ class Tree:
 
                 return node
 
+    def build_1d_trees(self, x_data, kmeans=None, type="cost_search"):
+        if type == "cost_search":
+            tree_func = self.tree_1d_cost_search
+        self.trees_1d = [tree_func(x_data, kmeans, i)
+                         for i in range(x_data.shape[1])]
+
     def fit(self, x_data, kmeans=None):
         """
         Build a threshold tree from the training set x_data.
@@ -159,7 +165,10 @@ class Tree:
 
         return self
 
-    def fit_1d_cost_search(self, x_data, kmeans=None, dim=None):
+    def get_tree_1d(self, x_data, kmeans=None, dim=None):
+        self.tree = self.tree_1d_cost_search(x_data, kmeans, dim)
+
+    def tree_1d_cost_search(self, x_data, kmeans=None, dim=None):
         """
         Build a threshold tree from the training set x_data based on the
         algorithm to minimize the expected cost of searching through the tree,
@@ -181,7 +190,7 @@ class Tree:
         else:
             y = np.array(kmeans.predict(x_data), dtype=np.int32)
 
-        if not(dim):
+        if dim is None:
             dim = self.valid_col_idx[0]
 
         centers = kmeans.cluster_centers_
@@ -192,9 +201,9 @@ class Tree:
 
         separated = get_separations(x_d,centers_d,assigns_d)
         costs = separated.sum(axis=0)
-        tree = tree_with_costs(costs)
+        tree = tree_with_costs(costs, 0)
         tree_with_mids(tree,centers_d,idx_centers,dim)
-        self.tree = tree
+        return tree
 
     def fit_predict(self, x_data, kmeans=None):
         """
@@ -502,16 +511,17 @@ def get_separations(data, centers, assigns):
                          for i in range(len(mids))]
                         for j in zip(above_d, above_c)])
 
-def tree_with_costs(costs):
+def tree_with_costs(costs, prev):
     if not len(costs):
         return
     min_cost = costs.min()
     if not min_cost:
         cut = costs.argmin()
         node = Node()
-        node.value = cut
-        node.left  = tree_with_costs(costs[:cut])
-        node.right = tree_with_costs(costs[cut+1:])
+        node.feature = cut
+        node.value = 0
+        node.left  = tree_with_costs(costs[:cut], prev)
+        node.right = tree_with_costs(costs[cut+1:], node.feature+1)
         return node
     costs = costs / min_cost
     n = len(costs)
@@ -520,7 +530,7 @@ def tree_with_costs(costs):
     t = np.ceil(np.log2(n)**(1/3))
     r = max(np.ceil(1 - 1/t), 2)
 #     print(costs, j, lc, rc, r, t)
-    return tree_with_pos_costs(costs,j,lc,rc,r,t,0)
+    return tree_with_pos_costs(costs,j,lc,rc,r,t,prev)
 
 def tree_with_pos_costs(costs,j,lc,rc,r,t,prev):
     # print("infos:", costs, j, lc, rc, r, t)
