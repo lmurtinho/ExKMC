@@ -113,10 +113,38 @@ class Tree:
                 return node
 
     def build_1d_trees(self, x_data, kmeans=None, type="cost_search"):
+        x_data = convert_input(x_data)
+
+        if kmeans is None:
+            if self.verbose > 0:
+                print('Finding %d-means' % self.k)
+            kmeans = KMeans(self.k, verbose=self.verbose,
+                            n_init=1, max_iter=40)
+            kmeans.fit(x_data)
+        else:
+            assert kmeans.n_clusters == self.k
+
+        if hasattr(kmeans,'labels_'):
+            y = np.array(kmeans.labels_, dtype=np.int32)
+        else:
+            y = np.array(kmeans.predict(x_data), dtype=np.int32)
+
+        self.all_centers = np.array(kmeans.cluster_centers_, dtype=np.float64)
+
         if type == "cost_search":
             tree_func = self.tree_1d_cost_search
-        self.trees_1d = [tree_func(x_data, kmeans, i)
+        elif type == "dasgupta":
+            tree_func = self.tree_1d_cut_min
+        self.trees_1d = [tree_func(x_data, y, i)
                          for i in range(x_data.shape[1])]
+
+    def tree_1d_cut_min(self,x_data,y,dim):
+        valid_cols = np.zeros(x_data.shape[1])
+        valid_cols[dim] = 1
+        return self._build_tree(x_data, y,
+                                np.ones(self.all_centers.shape[0],
+                                        dtype=np.int32),
+                                valid_cols)
 
     def fit(self, x_data, kmeans=None):
         """
@@ -165,38 +193,15 @@ class Tree:
 
         return self
 
-    def get_tree_1d(self, x_data, kmeans=None, dim=None):
-        self.tree = self.tree_1d_cost_search(x_data, kmeans, dim)
-
-    def tree_1d_cost_search(self, x_data, kmeans=None, dim=None):
+    def tree_1d_cost_search(self, x_data, y, dim):
         """
         Build a threshold tree from the training set x_data based on the
         algorithm to minimize the expected cost of searching through the tree,
         for a single dimension
         """
-        x_data = convert_input(x_data)
-
-        if kmeans is None:
-            if self.verbose > 0:
-                print('Finding %d-means' % self.k)
-            kmeans = KMeans(self.k, n_jobs=self.n_jobs, verbose=self.verbose,
-                            n_init=1, max_iter=40)
-            kmeans.fit(x_data)
-        else:
-            assert kmeans.n_clusters == self.k
-
-        if hasattr(kmeans,'labels_'):
-            y = np.array(kmeans.labels_, dtype=np.int32)
-        else:
-            y = np.array(kmeans.predict(x_data), dtype=np.int32)
-
-        if dim is None:
-            dim = self.valid_col_idx[0]
-
-        centers = kmeans.cluster_centers_
-        idx_centers = centers[:,dim].argsort()
-        centers_d   = centers[:,dim][idx_centers]
-        assigns_d   = centers[y,dim]
+        idx_centers = self.all_centers[:,dim].argsort()
+        centers_d   = self.all_centers[:,dim][idx_centers]
+        assigns_d   = self.all_centers[y,dim]
         x_d         =  x_data[:,dim]
 
         separated = get_separations(x_d,centers_d,assigns_d)
@@ -513,13 +518,14 @@ def get_separations(data, centers, assigns):
 
 def tree_with_costs(costs, prev):
     if not len(costs):
-        return
+        return Node()
     min_cost = costs.min()
     if not min_cost:
         cut = costs.argmin()
+        # print("clean cut identified", cut)
         node = Node()
         node.feature = cut
-        node.value = 0
+        # node.mistakes = 0
         node.left  = tree_with_costs(costs[:cut], prev)
         node.right = tree_with_costs(costs[cut+1:], node.feature+1)
         return node
@@ -529,6 +535,7 @@ def tree_with_costs(costs, prev):
     lc=rc=0
     t = np.ceil(np.log2(n)**(1/3))
     r = max(np.ceil(1 - 1/t), 2)
+    # print("n", n, "t", t, "r", r)
 #     print(costs, j, lc, rc, r, t)
     return tree_with_pos_costs(costs,j,lc,rc,r,t,prev)
 
@@ -576,7 +583,7 @@ def tree_with_pos_costs(costs,j,lc,rc,r,t,prev):
 
     node = Node()
     node.feature = x_idx + prev
-    node.value = costs[x_idx]
+    # node.mistakes = costs[x_idx]
     # print("result:", node.feature, node.value)
     # print()
     # TODO: check valores de lc e rc na segunda versão
