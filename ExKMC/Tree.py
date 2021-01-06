@@ -50,6 +50,105 @@ class Tree:
         self._feature_importance = None
         self.valid_col_idx = valid_col_idx
 
+    def find_lca(self, x_data, y, valid_centers, dim):
+        centers = self.all_centers[valid_centers, dim]
+        tree = self.trees_1d[dim]
+        while True:
+            if np.all(centers > tree.value):
+                tree = tree.right
+            elif np.all(centers <= tree.value):
+                tree = tree.left
+            else:
+                return tree.value
+
+    def find_largest_side(self, x_data, y, valid_centers):
+        centers = self.all_centers[valid_centers]
+        box = centers.max(axis=0) - centers.min(axis=0)
+        return box.argmax()
+
+    def find_fewest_mistakes(self, x_data, y, valid_centers):
+        centers = self.all_centers[valid_centers]
+        min_mistakes = np.inf
+        best_dim = -1
+        for dim in range(len(self.trees_1d)):
+            val = self.find_lca(x_data, y, valid_centers, dim)
+            data_mask = x_data[:,dim] <= val
+            assigns_mask = self.all_centers[y,dim] <= val
+            mistakes_mask = data_mask != assigns_mask
+            n_mistakes = mistakes.sum()
+            if n_mistakes < min_mistakes:
+                best_dim = dim
+                min_mistakes = min_mistakes
+        return best_dim
+
+    def build_from_1d(self, x_data, y, valid_centers,
+                      kmeans=None, type_1d="cost_search",
+                      find_feat="largest_side", find_val="lca"):
+        # print(x_data.shape, y.shape, valid_centers.shape, valid_centers.sum())
+        # print(self.all_centers[valid_centers])
+        # print(valid_centers)
+        self.build_1d_trees(x_data,kmeans=kmeans,type=type_1d)
+        node = Node()
+        self.node_list.append(node)
+
+        # base cases
+        if x_data.shape[0] == 0:
+            node.value = 0
+            return node
+        if valid_centers.sum() == 1:
+            # print("single center")
+            # print()
+            node.value = np.argmax(valid_centers)
+            return node
+        if np.unique(y).shape[0] == 1:
+            node.value = y[0]
+            return node
+
+        if find_feat == "largest_side":
+            find_feat_func = self.find_largest_side
+        elif find_feat == "fewest_mistakes":
+            find_feat_func = self.find_fewest_mistakes
+        if find_val == "lca":
+            find_val_func = self.find_lca
+        # check if valid_centers or self.all_centers should be passed
+        # to functions
+        node.feature = find_feat_func(x_data, y, valid_centers)
+        node.value   = find_val_func(x_data, y, valid_centers, node.feature)
+        # print(node.feature, node.value)
+        # print()
+        left_data_mask = x_data[:,node.feature] <= node.value
+        left_assign_mask = self.all_centers[y,node.feature] <= node.value
+        mistakes_mask = left_data_mask != left_assign_mask
+
+        left_valid_centers = np.zeros(self.k, dtype=bool)
+        right_valid_centers = np.zeros(self.k, dtype=bool)
+        for i in range(self.k):
+            if valid_centers[i]:
+                if self.all_centers[i, node.feature] <= node.value:
+                    left_valid_centers[i] = True
+                else:
+                    right_valid_centers[i] = True
+
+        # left_valid_centers_mask = self.all_centers[valid_centers, node.feature] <= node.value
+        # left_valid_centers = np.zeros(valid_centers.shape, dtype=bool)
+        # left_valid_centers[valid_centers] = left_valid_centers_mask
+        #
+        # right_valid_centers = np.zeros(valid_centers.shape, dtype=bool)
+        # right_valid_centers[valid_centers.astype(bool)] = ~left_valid_centers_mask
+
+        node.left = self.build_from_1d(x_data[left_data_mask & ~mistakes_mask],
+                                        y[left_data_mask & ~mistakes_mask],
+                                        left_valid_centers, kmeans, type_1d,
+                                        find_feat, find_val)
+        node.right = self.build_from_1d(x_data[~left_data_mask & ~mistakes_mask],
+                                         y[~left_data_mask & ~mistakes_mask],
+                                         right_valid_centers, kmeans, type_1d,
+                                         find_feat, find_val)
+
+        self.tree = node
+        return node
+
+
     def _build_tree(self, x_data, y, valid_centers, valid_cols):
         """
         Build a tree.
