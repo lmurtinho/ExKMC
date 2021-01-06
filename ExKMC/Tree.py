@@ -75,19 +75,18 @@ class Tree:
             data_mask = x_data[:,dim] <= val
             assigns_mask = self.all_centers[y,dim] <= val
             mistakes_mask = data_mask != assigns_mask
-            n_mistakes = mistakes.sum()
+            n_mistakes = mistakes_mask.sum()
             if n_mistakes < min_mistakes:
                 best_dim = dim
                 min_mistakes = min_mistakes
         return best_dim
 
     def build_from_1d(self, x_data, y, valid_centers,
-                      kmeans=None, type_1d="cost_search",
                       find_feat="largest_side", find_val="lca"):
         # print(x_data.shape, y.shape, valid_centers.shape, valid_centers.sum())
         # print(self.all_centers[valid_centers])
         # print(valid_centers)
-        self.build_1d_trees(x_data,kmeans=kmeans,type=type_1d)
+
         node = Node()
         self.node_list.append(node)
 
@@ -138,14 +137,13 @@ class Tree:
 
         node.left = self.build_from_1d(x_data[left_data_mask & ~mistakes_mask],
                                         y[left_data_mask & ~mistakes_mask],
-                                        left_valid_centers, kmeans, type_1d,
+                                        left_valid_centers,
                                         find_feat, find_val)
         node.right = self.build_from_1d(x_data[~left_data_mask & ~mistakes_mask],
                                          y[~left_data_mask & ~mistakes_mask],
-                                         right_valid_centers, kmeans, type_1d,
+                                         right_valid_centers,
                                          find_feat, find_val)
 
-        self.tree = node
         return node
 
 
@@ -211,24 +209,7 @@ class Tree:
 
                 return node
 
-    def build_1d_trees(self, x_data, kmeans=None, type="cost_search"):
-        x_data = convert_input(x_data)
-
-        if kmeans is None:
-            if self.verbose > 0:
-                print('Finding %d-means' % self.k)
-            kmeans = KMeans(self.k, verbose=self.verbose,
-                            n_init=1, max_iter=40)
-            kmeans.fit(x_data)
-        else:
-            assert kmeans.n_clusters == self.k
-
-        if hasattr(kmeans,'labels_'):
-            y = np.array(kmeans.labels_, dtype=np.int32)
-        else:
-            y = np.array(kmeans.predict(x_data), dtype=np.int32)
-
-        self.all_centers = np.array(kmeans.cluster_centers_, dtype=np.float64)
+    def build_1d_trees(self, x_data, y, type="cost_search"):
 
         if type == "cost_search":
             tree_func = self.tree_1d_cost_search
@@ -244,6 +225,31 @@ class Tree:
                                 np.ones(self.all_centers.shape[0],
                                         dtype=np.int32),
                                 valid_cols)
+
+    def fit_from_1d(self,x_data,kmeans=None, type_1d="cost_search",
+                    find_feat="largest_side", find_val="lca"):
+        x_data = convert_input(x_data)
+
+        if kmeans is None:
+            if self.verbose > 0:
+                print('Finding %d-means' % self.k)
+            kmeans = KMeans(self.k, n_jobs=self.n_jobs, verbose=self.verbose, n_init=1, max_iter=40)
+            kmeans.fit(x_data)
+        else:
+            assert kmeans.n_clusters == self.k
+
+        y = np.array(kmeans.predict(x_data), dtype=np.int32)
+        self.all_centers = np.array(kmeans.cluster_centers_, dtype=np.float64)
+        valid_centers = np.ones(self.k, dtype=bool)
+
+        self.build_1d_trees(x_data, y, type=type_1d)
+        self.tree = self.build_from_1d(x_data, y, valid_centers,
+                                        find_feat,find_val)
+
+        self._feature_importance = np.zeros(x_data.shape[1])
+        self.__fill_stats__(self.tree, x_data, y)
+
+        return self
 
     def fit(self, x_data, kmeans=None):
         """
