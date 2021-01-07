@@ -51,6 +51,7 @@ class Tree:
         self.valid_col_idx = valid_col_idx
 
     def find_lca(self, x_data, y, valid_centers, dim):
+        # print(valid_centers)
         centers = self.all_centers[valid_centers, dim]
         tree = self.trees_1d[dim]
         while True:
@@ -78,7 +79,7 @@ class Tree:
             n_mistakes = mistakes_mask.sum()
             if n_mistakes < min_mistakes:
                 best_dim = dim
-                min_mistakes = min_mistakes
+                min_mistakes = n_mistakes
         return best_dim
 
     def build_from_1d(self, x_data, y, valid_centers,
@@ -629,7 +630,7 @@ def tree_with_costs(costs, prev):
         cut = costs.argmin()
         # print("clean cut identified", cut)
         node = Node()
-        node.feature = cut
+        node.feature = cut + prev
         # node.mistakes = 0
         node.left  = tree_with_costs(costs[:cut], prev)
         node.right = tree_with_costs(costs[cut+1:], node.feature+1)
