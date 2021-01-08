@@ -62,24 +62,26 @@ class Tree:
             else:
                 return tree.value
 
-    def find_largest_side(self, x_data, y, valid_centers):
+    def find_largest_side(self, x_data, y, valid_centers, valid_cols):
         centers = self.all_centers[valid_centers]
         box = centers.max(axis=0) - centers.min(axis=0)
-        return box.argmax()
+        val = box[valid_cols].max()
+        return [i for i in range(len(box)) if box[i] == val][0]
 
-    def find_fewest_mistakes(self, x_data, y, valid_centers):
+    def find_fewest_mistakes(self, x_data, y, valid_centers, valid_cols):
         centers = self.all_centers[valid_centers]
         min_mistakes = np.inf
         best_dim = -1
         for dim in range(len(self.trees_1d)):
-            val = self.find_lca(x_data, y, valid_centers, dim)
-            data_mask = x_data[:,dim] <= val
-            assigns_mask = self.all_centers[y,dim] <= val
-            mistakes_mask = data_mask != assigns_mask
-            n_mistakes = mistakes_mask.sum()
-            if n_mistakes < min_mistakes:
-                best_dim = dim
-                min_mistakes = n_mistakes
+            if valid_cols[dim]:
+                val = self.find_lca(x_data, y, valid_centers, dim)
+                data_mask = x_data[:,dim] <= val
+                assigns_mask = self.all_centers[y,dim] <= val
+                mistakes_mask = data_mask != assigns_mask
+                n_mistakes = mistakes_mask.sum()
+                if n_mistakes < min_mistakes:
+                    best_dim = dim
+                    min_mistakes = n_mistakes
         return best_dim
 
     def build_from_1d(self, x_data, y, valid_centers,
@@ -112,7 +114,10 @@ class Tree:
             find_val_func = self.find_lca
         # check if valid_centers or self.all_centers should be passed
         # to functions
-        node.feature = find_feat_func(x_data, y, valid_centers)
+        valid_cols = np.array([1 if len(np.unique(x_data[:,i])) > 1 else 0
+                                for i in range(x_data.shape[1])],
+                                dtype=bool)
+        node.feature = find_feat_func(x_data, y, valid_centers, valid_cols)
         node.value   = find_val_func(x_data, y, valid_centers, node.feature)
         # print(node.feature, node.value)
         # print()
