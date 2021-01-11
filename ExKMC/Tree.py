@@ -64,12 +64,32 @@ class Tree:
 
     def find_largest_side(self, x_data, y, valid_centers, valid_cols):
         centers = self.all_centers[valid_centers]
-        box = centers.max(axis=0) - centers.min(axis=0)
-        val = box[valid_cols].max()
-        return [i for i in range(len(box)) if box[i] == val][0]
+        center_box = centers.max(axis=0) - centers.min(axis=0)
+        val = center_box[valid_cols].max()
+        return [i for i in range(len(center_box)) if center_box[i] == val][0]
 
     def find_fewest_mistakes(self, x_data, y, valid_centers, valid_cols):
         centers = self.all_centers[valid_centers]
+        min_mistakes = np.inf
+        best_dim = -1
+        for dim in range(len(self.trees_1d)):
+            if valid_cols[dim]:
+                val = self.find_lca(x_data, y, valid_centers, dim)
+                data_mask = x_data[:,dim] <= val
+                assigns_mask = self.all_centers[y,dim] <= val
+                mistakes_mask = data_mask != assigns_mask
+                n_mistakes = mistakes_mask.sum()
+                if n_mistakes < min_mistakes:
+                    best_dim = dim
+                    min_mistakes = n_mistakes
+        return best_dim
+
+    def find_mistakes_abv_avg(self, x_data, y, valid_centers, valid_cols):
+        centers = self.all_centers[valid_centers]
+        center_box = centers.max(axis=0) - centers.min(axis=0)
+        mean_center_box = center_box.mean()
+        below_mean_mask = center_box <= mean_center_box
+        valid_cols[below_mean_mask] = False
         min_mistakes = np.inf
         best_dim = -1
         for dim in range(len(self.trees_1d)):
@@ -110,6 +130,8 @@ class Tree:
             find_feat_func = self.find_largest_side
         elif find_feat == "fewest_mistakes":
             find_feat_func = self.find_fewest_mistakes
+        elif find_feat == "fewest_mistakes_abv_avg":
+            find_feat_func = self.find_mistakes_abv_avg
         if find_val == "lca":
             find_val_func = self.find_lca
         # check if valid_centers or self.all_centers should be passed
